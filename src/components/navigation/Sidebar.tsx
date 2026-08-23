@@ -1,9 +1,11 @@
 import React from 'react';
 import { useApp } from '../../context/AppContext';
+import { useAuth } from '../../context/AuthContext';
 import { NavScreen } from '../../types';
 
 export const Sidebar: React.FC = () => {
   const { currentScreen, setCurrentScreen, setEmergencyModalOpen, camera } = useApp();
+  const { user, logout } = useAuth();
   const { isMonitoring } = camera;
 
   const navItems: { id: NavScreen; label: string; icon: string }[] = [
@@ -22,7 +24,7 @@ export const Sidebar: React.FC = () => {
           <span className="material-symbols-outlined text-primary text-[28px]" style={{ fontVariationSettings: "'FILL' 1" }}>
             security
           </span>
-          <h1 className="font-headline-md text-xl font-bold text-primary tracking-tight">Guardian AI</h1>
+          <h1 className="font-headline-md text-xl font-bold text-primary tracking-tight">SentryCrib</h1>
         </div>
         <div className="flex items-center gap-2">
           <span className={`w-2 h-2 rounded-full ${isMonitoring ? 'bg-primary-container pulse-green' : 'bg-outline'} block`} />
@@ -60,16 +62,38 @@ export const Sidebar: React.FC = () => {
         })}
       </ul>
 
-      {/* Bottom Emergency Action */}
-      <div className="mt-auto px-4 pt-4 border-t border-outline-variant/30">
+      {/* Bottom Emergency Action & User Profile */}
+      <div className="mt-auto px-4 pt-4 border-t border-outline-variant/30 space-y-3">
         <button
           type="button"
           onClick={() => setEmergencyModalOpen(true)}
-          className="w-full bg-error text-on-error font-label-sm text-sm py-3 rounded-2xl flex items-center justify-center gap-2 hover:bg-error/90 active:scale-98 transition-all shadow-sm"
+          className="w-full bg-error text-on-error font-label-sm text-xs py-2.5 rounded-2xl flex items-center justify-center gap-2 hover:bg-error/90 active:scale-98 transition-all shadow-sm"
         >
-          <span className="material-symbols-outlined text-[20px]">emergency</span>
+          <span className="material-symbols-outlined text-[18px]">emergency</span>
           <span>Emergency Call</span>
         </button>
+
+        {/* User profile with Sign Out */}
+        <div className="flex items-center justify-between pt-1 border-t border-outline-variant/20">
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="w-7 h-7 rounded-full bg-primary-fixed text-on-primary-fixed flex items-center justify-center text-xs font-bold shrink-0">
+              {user?.displayName?.[0]?.toUpperCase() || 'U'}
+            </div>
+            <div className="min-w-0">
+              <p className="text-xs font-bold text-on-surface truncate">{user?.displayName || 'Caregiver'}</p>
+              <p className="text-[10px] text-on-surface-variant truncate">{user?.email || 'Authenticated'}</p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={logout}
+            className="p-1.5 text-on-surface-variant hover:text-error hover:bg-error-container/30 rounded-lg transition-colors"
+            title="Sign Out"
+            aria-label="Sign Out"
+          >
+            <span className="material-symbols-outlined text-lg">logout</span>
+          </button>
+        </div>
       </div>
     </nav>
   );

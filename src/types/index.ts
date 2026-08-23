@@ -1,4 +1,21 @@
 export type NavScreen = 'dashboard' | 'live-monitor' | 'alert-history' | 'settings' | 'about';
+export type PublicScreen = 'landing' | 'login' | 'signup' | 'forgot-password';
+
+export type AuthState = 
+  | 'INITIALIZING'
+  | 'SIGNED_OUT'
+  | 'SIGNING_IN'
+  | 'SIGNED_UP'
+  | 'SIGNED_IN'
+  | 'SIGNING_OUT'
+  | 'ERROR';
+
+export interface UserProfile {
+  uid: string;
+  email: string | null;
+  displayName: string | null;
+  photoURL?: string | null;
+}
 
 export type AlertSeverity = 'critical' | 'medium' | 'low';
 

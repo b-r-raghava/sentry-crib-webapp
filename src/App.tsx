@@ -1,4 +1,5 @@
 import React from 'react';
+import { AuthProvider, useAuth } from './context/AuthContext';
 import { AppProvider, useApp } from './context/AppContext';
 import { Sidebar } from './components/navigation/Sidebar';
 import { Header } from './components/navigation/Header';
@@ -7,6 +8,10 @@ import { EmergencyModal } from './components/common/EmergencyModal';
 import { DefineAreaModal } from './components/common/DefineAreaModal';
 import { AlertPlaybackModal } from './components/common/AlertPlaybackModal';
 import { ExportReportModal } from './components/common/ExportReportModal';
+
+import { LandingPageScreen } from './screens/LandingPageScreen';
+import { LoginScreen } from './screens/LoginScreen';
+import { SignUpScreen } from './screens/SignUpScreen';
 
 import { DashboardScreen } from './screens/DashboardScreen';
 import { LiveMonitorScreen } from './screens/LiveMonitorScreen';
@@ -59,11 +64,52 @@ const MainLayout: React.FC = () => {
   );
 };
 
-export function App() {
+const RootAppRouter: React.FC = () => {
+  const { user, authState, currentPublicScreen } = useAuth();
+
+  // Initializing session state
+  if (authState === 'INITIALIZING') {
+    return (
+      <div className="min-h-screen bg-soft-sand flex flex-col items-center justify-center p-6 text-center select-none">
+        <div className="w-16 h-16 rounded-2xl bg-primary text-on-primary flex items-center justify-center mb-4 shadow-md">
+          <span className="material-symbols-outlined text-3xl" style={{ fontVariationSettings: "'FILL' 1" }}>
+            security
+          </span>
+        </div>
+        <h2 className="font-headline-md text-xl font-bold text-primary tracking-tight mb-2">
+          SentryCrib
+        </h2>
+        <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  // Public Unauthenticated Entry Flow
+  if (!user) {
+    switch (currentPublicScreen) {
+      case 'login':
+        return <LoginScreen />;
+      case 'signup':
+        return <SignUpScreen />;
+      case 'landing':
+      default:
+        return <LandingPageScreen />;
+    }
+  }
+
+  // Authenticated Protected Monitoring Dashboard
   return (
     <AppProvider>
       <MainLayout />
     </AppProvider>
+  );
+};
+
+export function App() {
+  return (
+    <AuthProvider>
+      <RootAppRouter />
+    </AuthProvider>
   );
 }
 

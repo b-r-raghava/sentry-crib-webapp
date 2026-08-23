@@ -1,8 +1,10 @@
 import React from 'react';
 import { useApp } from '../../context/AppContext';
+import { useAuth } from '../../context/AuthContext';
 
 export const Header: React.FC = () => {
   const { currentScreen, setCurrentScreen, setEmergencyModalOpen, camera, alerts } = useApp();
+  const { logout } = useAuth();
   const { isMonitoring, startCamera, stopCamera } = camera;
 
   const handleToggleMonitoring = async () => {
@@ -24,7 +26,7 @@ export const Header: React.FC = () => {
       <div className="flex items-center gap-3">
         <div className="md:hidden flex items-center gap-2 cursor-pointer" onClick={() => setCurrentScreen('dashboard')}>
           <span className="material-symbols-outlined text-primary text-[24px]">security</span>
-          <span className="font-headline-md text-base font-bold text-primary">Guardian AI</span>
+          <span className="font-headline-md text-base font-bold text-primary">SentryCrib</span>
         </div>
         <div className="hidden md:block">
           <span className="font-caption text-xs uppercase tracking-wider text-outline font-semibold">
@@ -38,7 +40,7 @@ export const Header: React.FC = () => {
       </div>
 
       {/* Right Header Actions */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2 sm:gap-3">
         {/* Toggle Monitoring Action */}
         <button
           type="button"
@@ -78,6 +80,17 @@ export const Header: React.FC = () => {
           title="Emergency Call"
         >
           <span className="material-symbols-outlined text-[20px] text-error">emergency</span>
+        </button>
+
+        {/* Mobile Sign Out Button */}
+        <button
+          type="button"
+          onClick={logout}
+          className="md:hidden p-2 rounded-full hover:bg-surface-container text-on-surface-variant transition-colors"
+          title="Sign Out"
+          aria-label="Sign Out"
+        >
+          <span className="material-symbols-outlined text-[20px]">logout</span>
         </button>
       </div>
     </header>

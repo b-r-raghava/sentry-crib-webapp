@@ -13,17 +13,17 @@ export const AboutScreen: React.FC = () => {
             <span>Intelligent Infant Protection</span>
           </div>
           <h2 className="font-headline-lg text-2xl sm:text-3xl lg:text-4xl font-bold text-primary leading-tight">
-            Guardian AI: Professional Safety for the Modern Parent.
+            SentryCrib: Professional Safety for the Modern Parent.
           </h2>
           <p className="font-body-lg text-sm sm:text-base text-on-surface-variant leading-relaxed">
-            Traditional monitors just stream video of your baby. SentryCrib Guardian AI actively analyzes real-time video frames to detect edge falls, airway blockages, and sharp objects before incidents happen.
+            Traditional monitors just stream video of your baby. SentryCrib actively analyzes real-time video frames to detect edge falls, airway blockages, and sharp objects before incidents happen.
           </p>
         </div>
 
         <div className="md:col-span-6 h-[320px] sm:h-[400px] rounded-2xl overflow-hidden shadow-md relative group border border-outline-variant/40">
           <img
             src="https://images.unsplash.com/photo-1519689680058-324335c77eba?auto=format&fit=crop&w=1200&q=80"
-            alt="Modern Nursery with SentryCrib AI Monitor"
+            alt="Modern Nursery with SentryCrib Monitor"
             className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
           />
           <div className="absolute inset-0 bg-gradient-to-t from-background/80 via-transparent to-transparent flex items-end p-6">
@@ -41,7 +41,7 @@ export const AboutScreen: React.FC = () => {
       <section className="space-y-6">
         <div className="border-b border-outline-variant/50 pb-3">
           <h3 className="font-headline-md text-xl md:text-2xl font-bold text-primary">
-            How Guardian AI Works
+            How SentryCrib Works
           </h3>
           <p className="text-xs sm:text-sm text-on-surface-variant mt-1">
             Engineered with a Safety-as-a-Service approach that couples nursery calm with medical-grade reliability.
@@ -71,7 +71,7 @@ export const AboutScreen: React.FC = () => {
               <div>
                 <h4 className="font-headline-md text-base font-bold text-primary">Software-Only Architecture</h4>
                 <p className="font-body-md text-xs sm:text-sm text-on-surface-variant mt-1 leading-relaxed">
-                  No proprietary, locked-in camera hardware required. Guardian AI connects natively to standard RTSP, ONVIF, or IP camera video streams, turning any high-definition camera into an intelligent safety sentinel.
+                  No proprietary, locked-in camera hardware required. SentryCrib connects natively to standard RTSP, ONVIF, or IP camera video streams, turning any high-definition camera into an intelligent safety sentinel.
                 </p>
               </div>
             </div>
@@ -93,7 +93,7 @@ export const AboutScreen: React.FC = () => {
           <div className="h-full min-h-[320px] rounded-2xl overflow-hidden shadow-sm border border-outline-variant/50 relative group">
             <img
               src="https://images.unsplash.com/photo-1588854337236-6889d631faa8?auto=format&fit=crop&w=1200&q=80"
-              alt="Guardian AI Nursery Safety Monitoring Setup"
+              alt="SentryCrib Nursery Safety Monitoring Setup"
               className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
             />
             <div className="absolute inset-0 bg-gradient-to-t from-inverse-surface/90 via-inverse-surface/30 to-transparent flex flex-col justify-end p-6 text-white">
