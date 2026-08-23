@@ -2,13 +2,19 @@ import { DetectedObject, SafetyContextResult, OverallSafetyState, BoundingBoxNor
 
 export interface SafetyEngineOptions {
   toddlerSafetyRadiusPct?: number; // Normalized image-space radius (e.g. 30% of frame)
+  dangerConfirmationDurationMs?: number; // Continuous danger duration before confirmation (default: 5000ms / 5s)
 }
 
 export class SafetyContextEngine {
   private toddlerSafetyRadiusPct: number = 30; // 30% of normalized viewport
+  private dangerConfirmationDurationMs: number = 5000; // 5000ms (5 seconds) default confirmation threshold
+  private dangerStartTime: number | null = null;
+  private lastDangerSeenTime: number | null = null;
+  private isDangerConfirmed: boolean = false;
 
   constructor(options?: SafetyEngineOptions) {
     if (options?.toddlerSafetyRadiusPct) this.toddlerSafetyRadiusPct = options.toddlerSafetyRadiusPct;
+    if (options?.dangerConfirmationDurationMs) this.dangerConfirmationDurationMs = options.dangerConfirmationDurationMs;
   }
 
   public setToddlerSafetyRadius(radiusPct: number): void {
@@ -17,6 +23,20 @@ export class SafetyContextEngine {
 
   public getToddlerSafetyRadius(): number {
     return this.toddlerSafetyRadiusPct;
+  }
+
+  public setDangerConfirmationDurationMs(durationMs: number): void {
+    this.dangerConfirmationDurationMs = Math.max(1000, Math.min(30000, durationMs));
+  }
+
+  public getDangerConfirmationDurationMs(): number {
+    return this.dangerConfirmationDurationMs;
+  }
+
+  public resetDangerState(): void {
+    this.dangerStartTime = null;
+    this.lastDangerSeenTime = null;
+    this.isDangerConfirmed = false;
   }
 
   // Calculate normalized Euclidean distance between two bounding box centers (0 to 100%)
@@ -37,7 +57,7 @@ export class SafetyContextEngine {
     trackedObjects: DetectedObject[],
     currentTime: number = Date.now()
   ): SafetyContextResult {
-    // 1. Identify active Toddler (Strict: identityState === 'TODDLER')
+    // 1. Identify active entities
     const toddler = trackedObjects.find(
       obj => obj.className === 'person' && obj.identity?.identityState === 'TODDLER'
     );
@@ -64,201 +84,231 @@ export class SafetyContextEngine {
 
     const proximityEvents: SafetyContextResult['proximityEvents'] = [];
 
-    // CASE E: No toddler detected in camera frame
-    if (!toddler) {
-      if (sharpHazards.length > 0) {
-        return {
-          overallState: 'ATTENTION',
-          statusHeadline: 'Sharp Hazard in Monitored Space',
-          statusDescription: `${sharpHazards.length} sharp hazard(s) active in camera frame.`,
-          toddlerDetected: false,
-          recognisedPersonsCount: recognisedPersons.length,
-          unrecognisedPersonsCount: unrecognisedPersons.length,
-          unconfirmedPersonsCount: unconfirmedPersons.length,
-          animalsCount: animals.length,
-          sharpHazardsCount: sharpHazards.length,
-          proximityEvents: [],
-          activeRuleCase: 'SHARP_HAZARD_DANGER'
-        };
-      }
+    // =========================================================================
+    // RULE 1: PERSON + SHARP OBJECT SPATIAL ASSOCIATION (NO TODDLER REQUIRED)
+    // =========================================================================
+    let hasPersonHoldingSharp = false;
+    let heldSharpName = 'sharp object';
 
-      return {
-        overallState: 'SAFE',
-        statusHeadline: 'Monitored Space Clear',
-        statusDescription: 'Nursery space active. No enrolled toddler currently in frame.',
-        toddlerDetected: false,
-        recognisedPersonsCount: recognisedPersons.length,
-        unrecognisedPersonsCount: unrecognisedPersons.length,
-        unconfirmedPersonsCount: unconfirmedPersons.length,
-        animalsCount: animals.length,
-        sharpHazardsCount: 0,
-        proximityEvents: [],
-        activeRuleCase: 'CASE_E_NO_TODDLER'
-      };
+    for (const sharp of sharpHazards) {
+      for (const person of allPersons) {
+        const centerDist = this.computeCenterDistancePct(person.box, sharp.box);
+
+        // Bounding box intersection check
+        const interLeft = Math.max(person.box.left, sharp.box.left);
+        const interRight = Math.min(person.box.left + person.box.width, sharp.box.left + sharp.box.width);
+        const interTop = Math.max(person.box.top, sharp.box.top);
+        const interBottom = Math.min(person.box.top + person.box.height, sharp.box.top + sharp.box.height);
+        const isIntersecting = interRight > interLeft && interBottom > interTop;
+
+        // Arm / hand reach boundary check (Person bounding box expanded by 10%)
+        const sharpCenterX = sharp.box.left + sharp.box.width / 2;
+        const sharpCenterY = sharp.box.top + sharp.box.height / 2;
+        const inPersonReach =
+          sharpCenterX >= (person.box.left - 10) &&
+          sharpCenterX <= (person.box.left + person.box.width + 10) &&
+          sharpCenterY >= (person.box.top - 10) &&
+          sharpCenterY <= (person.box.top + person.box.height + 10);
+
+        if (isIntersecting || inPersonReach || centerDist <= 30) {
+          hasPersonHoldingSharp = true;
+          sharp.inProximityDanger = true;
+          person.inProximityDanger = true;
+          heldSharpName = sharp.displayName;
+
+          proximityEvents.push({
+            id: `prox-holding-${sharp.trackingId}-${person.trackingId}`,
+            type: 'sharp_hazard',
+            targetName: `${person.displayName} with ${sharp.displayName}`,
+            distancePct: Math.round(centerDist),
+            isDanger: true,
+            isAttention: false,
+            description: `Person holding ${sharp.displayName} (${Math.round(centerDist)}% reach distance)`
+          });
+          break;
+        }
+      }
     }
 
-    // Toddler is present: Calculate spatial relationships
-    let hasSharpHazardInReach = false;
+    // =========================================================================
+    // RULE 2: TODDLER PROXIMITY RELATIONSHIPS (IF TODDLER IS IN FRAME)
+    // =========================================================================
     let hasUnrecognisedNearToddler = false;
     let hasRecognisedCaregiverNearToddler = false;
     let hasAnimalNearToddler = false;
 
-    // A. Evaluate Sharp Hazard Proximity to Toddler
-    for (const sharp of sharpHazards) {
-      const dist = this.computeCenterDistancePct(toddler.box, sharp.box);
-      sharp.proximityDistanceToToddlerPct = Math.round(dist);
+    if (toddler) {
+      // Evaluate Persons Proximity to Toddler
+      for (const person of allPersons) {
+        if (person.id === toddler.id) continue;
 
-      if (dist <= this.toddlerSafetyRadiusPct) {
-        hasSharpHazardInReach = true;
-        sharp.inProximityDanger = true;
-        proximityEvents.push({
-          id: `prox-sharp-${sharp.trackingId}`,
-          type: 'sharp_hazard',
-          targetName: sharp.displayName,
-          distancePct: Math.round(dist),
-          isDanger: true,
-          isAttention: false,
-          description: `Sharp hazard (${sharp.displayName}) within toddler reach (${Math.round(dist)}% distance)`
-        });
+        const dist = this.computeCenterDistancePct(toddler.box, person.box);
+        person.proximityDistanceToToddlerPct = Math.round(dist);
+
+        const isNearby = dist <= this.toddlerSafetyRadiusPct;
+
+        if (isNearby) {
+          if (person.identity?.identityState === 'RECOGNISED') {
+            hasRecognisedCaregiverNearToddler = true;
+            proximityEvents.push({
+              id: `prox-caregiver-${person.trackingId}`,
+              type: 'caregiver_present',
+              targetName: person.displayName,
+              distancePct: Math.round(dist),
+              isDanger: false,
+              isAttention: false,
+              description: `Recognised caregiver (${person.displayName}) near toddler`
+            });
+          } else {
+            hasUnrecognisedNearToddler = true;
+          }
+        }
       }
-    }
 
-    // B. Evaluate Persons Proximity to Toddler
-    for (const person of allPersons) {
-      if (person.id === toddler.id) continue;
+      // Evaluate Animal Proximity to Toddler
+      for (const animal of animals) {
+        const dist = this.computeCenterDistancePct(toddler.box, animal.box);
+        animal.proximityDistanceToToddlerPct = Math.round(dist);
 
-      const dist = this.computeCenterDistancePct(toddler.box, person.box);
-      person.proximityDistanceToToddlerPct = Math.round(dist);
-
-      const isNearby = dist <= this.toddlerSafetyRadiusPct;
-
-      if (isNearby) {
-        if (person.identity?.identityState === 'RECOGNISED') {
-          hasRecognisedCaregiverNearToddler = true;
+        if (dist <= this.toddlerSafetyRadiusPct) {
+          hasAnimalNearToddler = true;
+          animal.inProximityAttention = true;
           proximityEvents.push({
-            id: `prox-caregiver-${person.trackingId}`,
-            type: 'caregiver_present',
-            targetName: person.displayName,
+            id: `prox-animal-${animal.trackingId}`,
+            type: 'animal',
+            targetName: animal.displayName,
             distancePct: Math.round(dist),
             isDanger: false,
-            isAttention: false,
-            description: `Recognised caregiver (${person.displayName}) near toddler`
+            isAttention: true,
+            description: `Household animal (${animal.displayName}) near toddler space (${Math.round(dist)}% distance)`
           });
-        } else {
-          // Both UNRECOGNISED and UNCONFIRMED count as unknown visitors near toddler
-          hasUnrecognisedNearToddler = true;
         }
       }
     }
 
-    // C. Evaluate Animal Proximity to Toddler
-    for (const animal of animals) {
-      const dist = this.computeCenterDistancePct(toddler.box, animal.box);
-      animal.proximityDistanceToToddlerPct = Math.round(dist);
-
-      if (dist <= this.toddlerSafetyRadiusPct) {
-        hasAnimalNearToddler = true;
-        animal.inProximityAttention = true;
-        proximityEvents.push({
-          id: `prox-animal-${animal.trackingId}`,
-          type: 'animal',
-          targetName: animal.displayName,
-          distancePct: Math.round(dist),
-          isDanger: false,
-          isAttention: true,
-          description: `Household animal (${animal.displayName}) near toddler space (${Math.round(dist)}% distance)`
-        });
-      }
-    }
-
-    // D. Evaluate Safety Rule Decisions
+    // =========================================================================
+    // SAFETY RULE DECISION HIERARCHY
+    // =========================================================================
     let overallState: OverallSafetyState = 'SAFE';
-    let headline = 'Toddler Safe';
-    let description = 'Toddler is in calibrated safe space with no hazards.';
-    let activeRuleCase: SafetyContextResult['activeRuleCase'] = 'CASE_D_SOLO_TODDLER';
+    let headline = 'Monitored Space Safe';
+    let description = 'System active. Monitored space clear of immediate hazards.';
+    let activeRuleCase: SafetyContextResult['activeRuleCase'] = 'CASE_E_NO_TODDLER';
 
-    // Priority 1: Direct Sharp Hazard Reach
-    if (hasSharpHazardInReach) {
+    // Priority 1: Person holding a sharp object (NO toddler required)
+    if (hasPersonHoldingSharp) {
       overallState = 'DANGER';
-      headline = 'Sharp Hazard Near Toddler';
-      description = 'Immediate caregiver intervention advised: sharp object within infant reach.';
+      headline = 'Person Holding Sharp Object';
+      description = 'Person holding a sharp object for more than 5 seconds.';
       activeRuleCase = 'SHARP_HAZARD_DANGER';
     }
-    // Priority 2: Unrecognised Person Spatial Rule
-    else if (hasUnrecognisedNearToddler) {
-      if (!hasRecognisedCaregiverNearToddler) {
-        // CASE A: Toddler + UNRECOGNISED + NO RECOGNISED caregiver nearby -> DANGER
-        overallState = 'DANGER';
-        headline = 'Unrecognised Person Near Toddler';
-        description = 'An unrecognised person has entered the toddler proximity radius with no authorised caregiver present.';
-        activeRuleCase = 'CASE_A_STRANGER_DANGER';
+    // Priority 2: Unrecognised Person near Toddler without caregiver
+    else if (toddler && hasUnrecognisedNearToddler && !hasRecognisedCaregiverNearToddler) {
+      overallState = 'DANGER';
+      headline = 'Unrecognised Person Near Toddler';
+      description = 'An unrecognised person has entered the toddler proximity radius with no authorised caregiver present.';
+      activeRuleCase = 'CASE_A_STRANGER_DANGER';
 
-        const unknownList = [...unrecognisedPersons, ...unconfirmedPersons];
-        for (const p of unknownList) {
-          if ((p.proximityDistanceToToddlerPct || 100) <= this.toddlerSafetyRadiusPct) {
-            p.inProximityDanger = true;
-            proximityEvents.push({
-              id: `prox-stranger-${p.trackingId}`,
-              type: 'unrecognised_person',
-              targetName: p.displayName || 'UNRECOGNISED Person',
-              distancePct: p.proximityDistanceToToddlerPct || 0,
-              isDanger: true,
-              isAttention: false,
-              description: `Unrecognised person in toddler proximity zone (${p.proximityDistanceToToddlerPct}% distance)`
-            });
-          }
-        }
-      } else {
-        // CASE B: Toddler + UNRECOGNISED + RECOGNISED caregiver nearby -> ATTENTION (Danger suppressed)
-        overallState = 'ATTENTION';
-        headline = 'Caregiver Accompanied by Visitor';
-        description = 'An unrecognised person is present near toddler, accompanied by an enrolled caregiver.';
-        activeRuleCase = 'CASE_B_CARE_VISITOR';
-
-        const unknownList = [...unrecognisedPersons, ...unconfirmedPersons];
-        for (const p of unknownList) {
-          if ((p.proximityDistanceToToddlerPct || 100) <= this.toddlerSafetyRadiusPct) {
-            p.inProximityAttention = true;
-            proximityEvents.push({
-              id: `prox-visitor-${p.trackingId}`,
-              type: 'unrecognised_person',
-              targetName: 'Unrecognised Visitor',
-              distancePct: p.proximityDistanceToToddlerPct || 0,
-              isDanger: false,
-              isAttention: true,
-              description: `Visitor near toddler accompanied by authorised caregiver`
-            });
-          }
+      const unknownList = [...unrecognisedPersons, ...unconfirmedPersons];
+      for (const p of unknownList) {
+        if ((p.proximityDistanceToToddlerPct || 100) <= this.toddlerSafetyRadiusPct) {
+          p.inProximityDanger = true;
+          proximityEvents.push({
+            id: `prox-stranger-${p.trackingId}`,
+            type: 'unrecognised_person',
+            targetName: p.displayName || 'UNRECOGNISED Person',
+            distancePct: p.proximityDistanceToToddlerPct || 0,
+            isDanger: true,
+            isAttention: false,
+            description: `Unrecognised person in toddler proximity zone (${p.proximityDistanceToToddlerPct}% distance)`
+          });
         }
       }
     }
-    // Priority 3: Animal Proximity Rule
-    else if (hasAnimalNearToddler) {
+    // Priority 3: Sharp object lying in space (not held by person)
+    else if (sharpHazards.length > 0) {
+      overallState = 'ATTENTION';
+      headline = 'Sharp Hazard in Monitored Space';
+      description = `${sharpHazards.length} sharp hazard(s) active in camera frame.`;
+      activeRuleCase = 'SHARP_HAZARD_DANGER';
+    }
+    // Priority 4: Caregiver accompanied by visitor near toddler
+    else if (toddler && hasUnrecognisedNearToddler && hasRecognisedCaregiverNearToddler) {
+      overallState = 'ATTENTION';
+      headline = 'Caregiver Accompanied by Visitor';
+      description = 'An unrecognised person is present near toddler, accompanied by an enrolled caregiver.';
+      activeRuleCase = 'CASE_B_CARE_VISITOR';
+    }
+    // Priority 5: Animal near toddler
+    else if (toddler && hasAnimalNearToddler) {
       overallState = 'ATTENTION';
       headline = 'Animal Near Toddler';
       description = 'Household animal has entered the toddler proximity zone.';
       activeRuleCase = 'ANIMAL_ALERT';
     }
-    // Priority 4: Recognised Caregiver Only
-    else if (hasRecognisedCaregiverNearToddler) {
+    // Priority 6: Toddler resting safely with caregiver
+    else if (toddler && hasRecognisedCaregiverNearToddler) {
       overallState = 'SAFE';
       headline = 'Caregiver Attending';
       description = 'Toddler is in direct company of an authorised caregiver.';
       activeRuleCase = 'CASE_C_KNOWN_ONLY';
-    } else {
-      // CASE D: Solo Toddler with no nearby persons
+    }
+    // Priority 7: Toddler resting safely alone
+    else if (toddler) {
       overallState = 'SAFE';
       headline = 'Toddler Monitored';
       description = 'Toddler is resting peacefully in safe space.';
       activeRuleCase = 'CASE_D_SOLO_TODDLER';
     }
+    // Priority 8: Space clear / No toddler
+    else {
+      overallState = 'SAFE';
+      headline = 'Monitored Space Clear';
+      description = 'Nursery space active. No enrolled toddler currently in frame.';
+      activeRuleCase = 'CASE_E_NO_TODDLER';
+    }
+
+    // =========================================================================
+    // 5-SECOND CONTINUOUS DANGER PERSISTENCE & CONFIRMATION
+    // =========================================================================
+    let currentDangerDuration = 0;
+
+    if (overallState === 'DANGER') {
+      if (this.dangerStartTime === null) {
+        this.dangerStartTime = currentTime;
+        this.lastDangerSeenTime = currentTime;
+        this.isDangerConfirmed = false;
+        currentDangerDuration = 0;
+      } else {
+        this.lastDangerSeenTime = currentTime;
+        currentDangerDuration = Math.max(0, currentTime - this.dangerStartTime);
+        if (currentDangerDuration >= this.dangerConfirmationDurationMs) {
+          this.isDangerConfirmed = true;
+        }
+      }
+    } else {
+      // Jitter tolerance: Allow up to 400ms detection dropout before resetting continuous timer
+      const timeSinceLastDanger = this.lastDangerSeenTime ? (currentTime - this.lastDangerSeenTime) : Infinity;
+      if (this.dangerStartTime !== null && timeSinceLastDanger < 400) {
+        currentDangerDuration = Math.max(0, currentTime - this.dangerStartTime);
+        if (currentDangerDuration >= this.dangerConfirmationDurationMs) {
+          this.isDangerConfirmed = true;
+        }
+      } else {
+        // Danger condition disappeared or resolved: reset persistence tracker
+        this.resetDangerState();
+        currentDangerDuration = 0;
+      }
+    }
 
     return {
       overallState,
+      isDangerConfirmed: this.isDangerConfirmed,
+      dangerDurationMs: currentDangerDuration,
+      dangerConfirmationThresholdMs: this.dangerConfirmationDurationMs,
       statusHeadline: headline,
       statusDescription: description,
-      toddlerDetected: true,
-      toddlerTrackId: toddler.trackingId,
+      toddlerDetected: Boolean(toddler),
+      toddlerTrackId: toddler?.trackingId,
       recognisedPersonsCount: recognisedPersons.length,
       unrecognisedPersonsCount: unrecognisedPersons.length,
       unconfirmedPersonsCount: unconfirmedPersons.length,

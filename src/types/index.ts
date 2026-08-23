@@ -74,6 +74,7 @@ export interface SafetySettingsState {
   notifications: {
     audioAlerts: boolean;
     smsAlerts: boolean;
+    systemNotifications: boolean;
     emergencyContact: string;
   };
 }

@@ -3,6 +3,7 @@ import { useApp } from '../context/AppContext';
 import { CURRENT_BUILTIN_SHARP_CLASSES, PLANNED_CUSTOM_SHARP_CLASSES } from '../services/sharpObjectDetector';
 import { faceRecognitionService, TODDLER_RECOGNITION_THRESHOLD, AUTHORIZED_PERSON_RECOGNITION_THRESHOLD } from '../services/faceRecognition';
 import { safetyContextEngine } from '../services/safetyContextEngine';
+import { browserNotificationService, NotificationPermissionState } from '../services/browserNotification';
 import { EnrolledProfile, EnrolledIdentitySample, FaceQualityReport } from '../types/detection';
 
 export const SafetySettingsScreen: React.FC = () => {
@@ -33,13 +34,49 @@ export const SafetySettingsScreen: React.FC = () => {
   const [isCameraSnapActive, setIsCameraSnapActive] = useState(false);
   const localStreamRef = useRef<MediaStream | null>(null);
 
+  // Notification Permission State
+  const [notificationPermission, setNotificationPermission] = useState<NotificationPermissionState>(
+    browserNotificationService.getPermissionState()
+  );
+  const [isTestingNotification, setIsTestingNotification] = useState(false);
+
   // Load enrolled identities on mount
   useEffect(() => {
     const config = faceRecognitionService.loadHouseholdConfig();
     setToddlerProfile(config.toddlerProfile);
     setAuthorisedPeople(config.authorisedPeople);
     setProximityRadius(safetyContextEngine.getToddlerSafetyRadius());
+    setNotificationPermission(browserNotificationService.getPermissionState());
   }, []);
+
+  const handleRequestNotificationPermission = async () => {
+    const result = await browserNotificationService.requestPermission();
+    setNotificationPermission(result);
+    if (result === 'GRANTED') {
+      setLocalSettings(prev => ({
+        ...prev,
+        notifications: {
+          ...prev.notifications,
+          systemNotifications: true
+        }
+      }));
+      browserNotificationService.setEnabled(true);
+      showToast('Browser notifications enabled.');
+    } else if (result === 'DENIED') {
+      showToast('Notification permission was denied in browser.');
+    }
+  };
+
+  const handleTestNotification = () => {
+    setIsTestingNotification(true);
+    const sent = browserNotificationService.sendTestNotification();
+    if (sent) {
+      showToast('Test notification dispatched to your browser.');
+    } else {
+      showToast('Could not dispatch test notification. Check permissions.');
+    }
+    setTimeout(() => setIsTestingNotification(false), 1000);
+  };
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -690,6 +727,114 @@ export const SafetySettingsScreen: React.FC = () => {
                     }
                     className="rounded text-primary focus:ring-primary w-4 h-4"
                   />
+                </div>
+
+                {/* System / Browser Notifications */}
+                <div className="p-4 bg-surface-container-low rounded-xl border border-outline-variant/30 space-y-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <span className="material-symbols-outlined text-primary text-2xl">desktop_windows</span>
+                      <div>
+                        <span className="text-sm font-bold text-on-surface block">System / Browser Notifications</span>
+                        <p className="text-xs text-on-surface-variant">
+                          Displays native operating system alerts when confirmed danger events occur (e.g. while tab is in background).
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      {notificationPermission === 'GRANTED' && (
+                        <span className="inline-flex items-center gap-1 bg-primary text-on-primary px-2.5 py-1 rounded-full font-label-sm text-[11px] font-bold">
+                          <span className="material-symbols-outlined text-[14px]">check_circle</span>
+                          <span>Granted</span>
+                        </span>
+                      )}
+                      {notificationPermission === 'DENIED' && (
+                        <span className="inline-flex items-center gap-1 bg-error text-on-error px-2.5 py-1 rounded-full font-label-sm text-[11px] font-bold">
+                          <span className="material-symbols-outlined text-[14px]">block</span>
+                          <span>Denied</span>
+                        </span>
+                      )}
+                      {notificationPermission === 'NOT_REQUESTED' && (
+                        <span className="inline-flex items-center gap-1 bg-[#f59e0b] text-white px-2.5 py-1 rounded-full font-label-sm text-[11px] font-bold">
+                          <span className="material-symbols-outlined text-[14px]">help</span>
+                          <span>Not Configured</span>
+                        </span>
+                      )}
+                      {notificationPermission === 'UNSUPPORTED' && (
+                        <span className="inline-flex items-center gap-1 bg-surface-variant text-on-surface-variant px-2.5 py-1 rounded-full font-label-sm text-[11px] font-bold">
+                          <span className="material-symbols-outlined text-[14px]">info</span>
+                          <span>Unsupported</span>
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {notificationPermission === 'NOT_REQUESTED' && (
+                    <div className="pt-2 flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-t border-outline-variant/30">
+                      <span className="text-xs text-on-surface-variant">
+                        Permission has not been requested yet. Click below to allow browser notifications.
+                      </span>
+                      <button
+                        type="button"
+                        onClick={handleRequestNotificationPermission}
+                        className="px-4 py-2 bg-primary text-on-primary text-xs font-bold rounded-xl hover:bg-primary-container transition-all active:scale-98 shrink-0 flex items-center gap-1.5"
+                      >
+                        <span className="material-symbols-outlined text-sm">notifications</span>
+                        <span>Enable System Notifications</span>
+                      </button>
+                    </div>
+                  )}
+
+                  {notificationPermission === 'GRANTED' && (
+                    <div className="pt-2 flex items-center justify-between border-t border-outline-variant/30">
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          id="toggle-system-notifs"
+                          checked={localSettings.notifications.systemNotifications}
+                          onChange={e => {
+                            const val = e.target.checked;
+                            setLocalSettings({
+                              ...localSettings,
+                              notifications: {
+                                ...localSettings.notifications,
+                                systemNotifications: val
+                              }
+                            });
+                            browserNotificationService.setEnabled(val);
+                          }}
+                          className="rounded text-primary focus:ring-primary w-4 h-4"
+                        />
+                        <label htmlFor="toggle-system-notifs" className="text-xs font-medium text-on-surface cursor-pointer">
+                          Allow danger notifications when monitoring is active
+                        </label>
+                      </div>
+
+                      {process.env.NODE_ENV !== 'production' && (
+                        <button
+                          type="button"
+                          onClick={handleTestNotification}
+                          disabled={isTestingNotification}
+                          className="px-3 py-1 bg-surface-container text-primary border border-primary/30 text-xs font-bold rounded-lg hover:bg-primary-fixed/20 transition-all active:scale-98 flex items-center gap-1"
+                        >
+                          <span className="material-symbols-outlined text-xs">send</span>
+                          <span>Test Notification</span>
+                        </button>
+                      )}
+                    </div>
+                  )}
+
+                  {notificationPermission === 'DENIED' && (
+                    <div className="p-3 bg-error-container/40 border border-error/30 rounded-xl text-on-error-container text-xs space-y-1">
+                      <div className="font-bold flex items-center gap-1.5">
+                        <span className="material-symbols-outlined text-sm text-error">info</span>
+                        <span>Permission Denied in Browser</span>
+                      </div>
+                      <p className="text-[11px] leading-relaxed opacity-90">
+                        Browser notifications were previously blocked. To receive danger alerts when your tab is in the background, open your browser site settings (lock icon in address bar) and set Notifications to "Allow".
+                      </p>
+                    </div>
+                  )}
                 </div>
               </div>
             </section>

@@ -30,6 +30,7 @@ export const INITIAL_SAFETY_SETTINGS: SafetySettingsState = {
   notifications: {
     audioAlerts: true,
     smsAlerts: false,
+    systemNotifications: true,
     emergencyContact: '+1 (555) 019-2834'
   }
 };

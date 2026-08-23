@@ -157,6 +157,9 @@ export type OverallSafetyState = 'SAFE' | 'ATTENTION' | 'DANGER';
 
 export interface SafetyContextResult {
   overallState: OverallSafetyState;
+  isDangerConfirmed: boolean; // true ONLY when DANGER has persisted continuously for >= threshold duration (e.g. 5000ms)
+  dangerDurationMs: number;   // elapsed continuous duration in milliseconds of current danger condition
+  dangerConfirmationThresholdMs: number; // configured confirmation threshold in milliseconds (default 5000ms)
   statusHeadline: string;
   statusDescription: string;
   toddlerDetected: boolean;

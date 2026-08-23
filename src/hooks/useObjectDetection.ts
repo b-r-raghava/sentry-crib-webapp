@@ -19,6 +19,7 @@ import { snakeDetectorService } from '../services/snakeDetector';
 import { tiledInferenceEngine, DEFAULT_TILED_CONFIG, TiledInferenceConfig } from '../services/tiledInference';
 import { faceRecognitionService } from '../services/faceRecognition';
 import { safetyContextEngine } from '../services/safetyContextEngine';
+import { browserNotificationService } from '../services/browserNotification';
 
 // Singleton model reference across component mounts
 let globalModelPromise: Promise<cocoSsd.ObjectDetection> | null = null;
@@ -41,6 +42,9 @@ const getOrLoadModel = async (): Promise<cocoSsd.ObjectDetection> => {
 
 const INITIAL_SAFETY_CONTEXT: SafetyContextResult = {
   overallState: 'SAFE',
+  isDangerConfirmed: false,
+  dangerDurationMs: 0,
+  dangerConfirmationThresholdMs: 5000,
   statusHeadline: 'Monitored Space Clear',
   statusDescription: 'System active. No infant or toddler currently in frame.',
   toddlerDetected: false,
@@ -139,6 +143,7 @@ export const useObjectDetection = (): UseObjectDetectionReturn => {
   const stopDetection = useCallback(() => {
     isDetectingRef.current = false;
     isInferenceRunningRef.current = false;
+    browserNotificationService.resetIncident();
     if (animationFrameIdRef.current) {
       cancelAnimationFrame(animationFrameIdRef.current);
       animationFrameIdRef.current = null;
@@ -287,7 +292,10 @@ export const useObjectDetection = (): UseObjectDetectionReturn => {
               setSafetyContext(safetyResult);
               setDetections(visibleDetections);
 
-              // 7. Calculate FPS & Latency
+              // 7. Dispatch Confirmed DANGER state to Native Browser Notification Service (with deduplication)
+              browserNotificationService.handleSafetyContext(safetyResult, isDetectingRef.current);
+
+              // 8. Calculate FPS & Latency
               const latencyMs = Math.round(performance.now() - startTime);
               frameCountRef.current += 1;
               const now = performance.now();
